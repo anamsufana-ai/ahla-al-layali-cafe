@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { cafe, whatsappLink } from '../data'
 import { useStore } from '../context/Store'
+import { useAuth } from '../context/Auth'
 
 const links = [
   ['/', 'Home'],
@@ -17,6 +18,7 @@ function Mark() {
 
 export default function Layout() {
   const { totals, toast } = useStore()
+  const { user } = useAuth()
   const location = useLocation()
   const [scrolled, setScrolled] = useState(false)
   const [open, setOpen] = useState(false)
@@ -75,6 +77,11 @@ export default function Layout() {
                 </li>
               ))}
               <li>
+                <NavLink to={user ? (user.role === 'admin' ? '/admin' : '/account') : '/login'}>
+                  {user ? 'Account' : 'Log in'}
+                </NavLink>
+              </li>
+              <li>
                 <NavLink to="/order" className="nav-order">
                   Order
                   {totals.count > 0 && <span className="nav-cart-badge">{totals.count}</span>}
@@ -97,6 +104,7 @@ export default function Layout() {
                   {label}
                 </NavLink>
               ))}
+              <NavLink to={user ? (user.role === 'admin' ? '/admin' : '/account') : '/login'}>{user ? 'Account' : 'Log in'}</NavLink>
               <NavLink to="/order">Order {totals.count > 0 ? `(${totals.count})` : ''}</NavLink>
               <NavLink to="/book">Book a table</NavLink>
             </div>
@@ -145,6 +153,15 @@ export default function Layout() {
               <li>
                 <Link to="/order">Order online</Link>
               </li>
+              <li>
+                <Link to="/account">Account</Link>
+              </li>
+              <li>
+                <Link to="/terms">Terms</Link>
+              </li>
+              <li>
+                <Link to="/privacy">Privacy</Link>
+              </li>
             </ul>
           </div>
           <div>
@@ -158,7 +175,11 @@ export default function Layout() {
         </div>
         <div className="container footer-bottom">
           <span>© {new Date().getFullYear()} Ahla Al Layali Cafe</span>
-          <span>Prices in AED, as on the café menu.</span>
+          <span>
+            <Link to="/terms">Terms</Link>
+            {' · '}
+            <Link to="/privacy">Privacy</Link>
+          </span>
         </div>
       </footer>
       {showTop && (

@@ -42,6 +42,7 @@ export default function ItemModal({ item, onClose }) {
       category: item.category,
       unit,
       qty,
+      choices,
       summary,
       note: note.trim(),
     })

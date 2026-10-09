@@ -40,8 +40,10 @@ export default function PackageModal({ offer, onClose }) {
       name: offer.title,
       nameAr: '',
       category: 'Package',
+      kind: 'package',
       unit,
       qty,
+      picks,
       summary: chosen.map((item) => item.name).join(' · '),
       note: note.trim(),
     })

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { areas, cafe, formatAED, menu, occasions, seating, timeSlots, whatsappLink } from '../data'
 import { useStore } from '../context/Store'
+import { useAuth } from '../context/Auth'
+import CardCounter from '../components/CardCounter'
 
 const MIN_GUESTS = cafe.minGuests
 
@@ -10,8 +12,7 @@ function areaBy(id) {
 }
 
 function reference() {
-  const stamp = Date.now().toString().slice(-6)
-  return `AAL-${stamp}`
+  return `AAL-${Date.now().toString().slice(-6)}`
 }
 
 function guestCount(value) {
@@ -22,12 +23,15 @@ function guestCount(value) {
 export default function BookPage() {
   const [params] = useSearchParams()
   const { bookings, saveBooking } = useStore()
+  const { user, saveRecord } = useAuth()
+  const navigate = useNavigate()
   const flavors = useMemo(
     () => menu.filter((item) => item.category === 'Shisha' && !item.name.toLowerCase().includes('renew')),
     [],
   )
   const [step, setStep] = useState('details')
   const [accepted, setAccepted] = useState(false)
+  const [paidCard, setPaidCard] = useState('')
   const [form, setForm] = useState({
     name: '',
     phone: '',
@@ -87,7 +91,7 @@ export default function BookPage() {
       `Area: ${booking.areaLabel || bookedArea.label}`,
       `${bookedArea.id === 'private' ? 'Cubicles' : 'Tables'}: ${count}`,
       `Reservation fee: ${formatAED(total)} (${formatAED(unitFee)} per ${bookedArea.unit})`,
-      'Fee is paid at the café counter.',
+      'Reservation fee is paid by card and is not refunded.',
       'Non-refundable if the party cancels or does not show up.',
       bookedArea.id === 'private'
         ? 'Food, drinks, and shisha are paid on top of the cubicle booking.'
@@ -102,8 +106,21 @@ export default function BookPage() {
       .join('\n')
   }
 
+  useEffect(() => {
+    if (!user) return
+    setForm((current) => ({
+      ...current,
+      name: current.name || user.name,
+      phone: current.phone || user.phone,
+    }))
+  }, [user])
+
   const goToCheckout = (event) => {
     event.preventDefault()
+    if (!user) {
+      navigate('/login?next=/book')
+      return
+    }
     if (!form.name.trim() || !form.phone.trim() || !form.date) {
       setError('Name, phone, and a date are required.')
       return
@@ -116,12 +133,9 @@ export default function BookPage() {
     setStep('checkout')
   }
 
-  const confirm = (event) => {
-    event.preventDefault()
-    if (!accepted) {
-      setError('Confirm the reservation fee before the table can be held.')
-      return
-    }
+  const payBooking = async ({ brand, last4 }) => {
+    if (!user) return 'Create an account before paying.'
+    if (!accepted) return 'Confirm the reservation fee before the table can be held.'
     const booking = {
       ...form,
       name: form.name.trim(),
@@ -135,12 +149,20 @@ export default function BookPage() {
       fee,
       seatLabel: placeLabel,
       ref: reference(),
+      paid: true,
       createdAt: new Date().toISOString(),
     }
+    await saveRecord('booking', {
+      ...booking,
+      total: fee,
+      text: messageFor(booking),
+      lines: [`${tables} ${unitLabel} · ${area.label}`, form.flavor ? `Shisha: ${form.flavor}` : 'Shisha: decide at the table'],
+    })
     saveBooking(booking)
+    setPaidCard(`${brand} ···· ${last4}`)
     setSaved(booking)
-    setStep('done')
     setError('')
+    return ''
   }
 
   return (
@@ -152,7 +174,7 @@ export default function BookPage() {
           </p>
           <h1>Book a table</h1>
           <p>
-            Minimum {MIN_GUESTS} guests. An open-area table is {formatAED(cafe.reservationFee)}. A private cubicle is {formatAED(cafe.privateFee)}. Both are paid at the counter and are not refunded if you cancel or do not arrive. Anything you order is paid on top.
+            Minimum {MIN_GUESTS} guests. An open-area table is {formatAED(cafe.reservationFee)}. A private cubicle is {formatAED(cafe.privateFee)}. The fee is paid by card and is not refunded if you cancel or do not arrive. Anything you order is paid on top. An account is required before checkout.
           </p>
         </div>
       </header>
@@ -160,8 +182,8 @@ export default function BookPage() {
         <div className="container">
           {saved ? (
             <article className="confirm-card">
-              <span className="confirm-kicker">Fee due at the counter</span>
-              <h2>Pay {formatAED(saved.fee)} to hold the {saved.area === 'private' ? 'cubicle' : 'table'}</h2>
+              <span className="confirm-kicker">Paid by card</span>
+              <h2>The {saved.area === 'private' ? 'cubicle' : 'table'} fee is paid</h2>
               <p className="ref">{saved.ref}</p>
               <p className="muted">
                 {saved.date} · {saved.time} · {saved.guests} guests · {saved.areaLabel || 'Open area'} · {saved.tables}{' '}
@@ -169,7 +191,8 @@ export default function BookPage() {
                 {saved.flavor ? ` · ${saved.flavor}` : ''}
               </p>
               <p className="muted">
-                Pay {formatAED(saved.fee)} at the café counter. It is not refunded if you cancel or do not show up.
+                {paidCard ? `${paidCard}. ` : ''}
+                {formatAED(saved.fee)} is paid. It is not refunded if you cancel or do not show up.
                 {saved.area === 'private'
                   ? ' Food, drinks, and shisha are paid on top of this booking.'
                   : ' Food, drinks, and shisha are paid when you dine.'}
@@ -187,6 +210,7 @@ export default function BookPage() {
                   style={{ width: 'auto' }}
                   onClick={() => {
                     setSaved(null)
+                    setPaidCard('')
                     setStep('details')
                     setAccepted(false)
                   }}
@@ -308,59 +332,59 @@ export default function BookPage() {
                   </button>
                 </form>
               ) : (
-                <form className="booking-card" onSubmit={confirm}>
-                  <p className="checkout-steps">
-                    <span>1. Details</span>
-                    <strong>2. Checkout</strong>
-                  </p>
-                  <h2 style={{ fontSize: '2rem', marginBottom: '0.4rem' }}>Checkout counter</h2>
-                  <p className="muted">
-                    {area.id === 'private'
-                      ? 'The cubicle booking is paid at the café counter. Food, drinks, and shisha are paid on top when you order.'
-                      : 'The table fee is paid at the café counter. Food, drinks, and shisha are paid when you dine.'}
-                  </p>
-                  <div className="receipt" style={{ marginTop: '1rem' }}>
-                    <div className="receipt-row">
+                <div className="booking-card">
+                  <CardCounter
+                    amount={formatAED(fee)}
+                    onPaid={payBooking}
+                    note="Visa, Mastercard, and American Express. This fee is not refunded if you cancel or do not show up."
+                  >
+                    <p className="checkout-steps">
+                      <span>1. Details</span>
+                      <strong>2. Checkout</strong>
+                    </p>
+                    <h2 style={{ fontSize: '2rem', marginBottom: '0.4rem' }}>Checkout counter</h2>
+                    <p className="muted">
+                      {area.id === 'private'
+                        ? 'The cubicle fee is paid by card now. Food, drinks, and shisha are paid on top when you order.'
+                        : 'The table fee is paid by card now. Food, drinks, and shisha are paid when you dine.'}
+                    </p>
+                    <div className="receipt" style={{ marginTop: '1rem' }}>
+                      <div className="receipt-row">
+                        <span>
+                          {form.name} · {form.guests} guests
+                        </span>
+                      </div>
+                      <div className="receipt-row">
+                        <span>
+                          {form.date} · {form.time}
+                        </span>
+                      </div>
+                      <div className="receipt-row">
+                        <span>{area.label}</span>
+                      </div>
+                      <div className="receipt-row">
+                        <span>
+                          {tables} {unitLabel} × {formatAED(area.fee)}
+                        </span>
+                        <span>{formatAED(fee)}</span>
+                      </div>
+                      <div className="receipt-row">
+                        <strong>Due now</strong>
+                        <strong>{formatAED(fee)}</strong>
+                      </div>
+                    </div>
+                    <label className="policy-check">
+                      <input type="checkbox" checked={accepted} onChange={(event) => setAccepted(event.target.checked)} />
                       <span>
-                        {form.name} · {form.guests} guests
+                        I agree that the {formatAED(area.fee)} {area.id === 'private' ? 'private cubicle booking' : 'fee per table'} is not refunded if we cancel or do not show up.
+                        {area.id === 'private' ? ' What we order is paid on top.' : ''}
                       </span>
-                    </div>
-                    <div className="receipt-row">
-                      <span>
-                        {form.date} · {form.time}
-                      </span>
-                    </div>
-                    <div className="receipt-row">
-                      <span>{area.label}</span>
-                    </div>
-                    <div className="receipt-row">
-                      <span>
-                        {tables} {unitLabel} × {formatAED(area.fee)}
-                      </span>
-                      <span>{formatAED(fee)}</span>
-                    </div>
-                    <div className="receipt-row">
-                      <strong>Due at the counter</strong>
-                      <strong>{formatAED(fee)}</strong>
-                    </div>
-                  </div>
-                  <label className="policy-check">
-                    <input type="checkbox" checked={accepted} onChange={(event) => setAccepted(event.target.checked)} />
-                    <span>
-                      I agree that the {formatAED(area.fee)} {area.id === 'private' ? 'private cubicle booking' : 'fee per table'} is not refunded if we cancel or do not show up.
-                      {area.id === 'private' ? ' What we order is paid on top.' : ''}
-                    </span>
-                  </label>
-                  {error && <p className="field-error">{error}</p>}
-                  <div className="inline-actions">
-                    <button className="btn btn-primary" type="submit">
-                      Confirm and pay {formatAED(fee)} at the counter
-                    </button>
-                    <button className="btn btn-line" type="button" style={{ width: 'auto' }} onClick={() => { setStep('details'); setError('') }}>
-                      Back
-                    </button>
-                  </div>
-                </form>
+                    </label>
+                  </CardCounter>
+                  <button className="btn btn-line" type="button" style={{ width: 'auto', marginTop: '0.8rem' }} onClick={() => { setStep('details'); setError('') }}>
+                    Back
+                  </button>
+                </div>
               )}
               <aside className="summary-card">
                 <p className="eyebrow" style={{ color: 'var(--gold)' }}>
@@ -394,7 +418,7 @@ export default function BookPage() {
                 <p className="muted">
                   {area.id === 'private'
                     ? 'The cubicle booking is not refunded on cancellation or no-show. What you order is paid on top.'
-                    : 'Not refunded on cancellation or no-show. The rest of the bill is paid when you dine.'}
+                    : 'Not refunded on cancellation or no-show. Food, drinks, and shisha are paid by card when you order.'}
                 </p>
               </aside>
             </div>
@@ -409,7 +433,7 @@ export default function BookPage() {
                     <strong>{booking.ref}</strong>
                     <p>
                       {booking.name} · {booking.date} · {booking.time} · {booking.guests} guests
-                      {booking.fee ? ` · ${formatAED(booking.fee)} due at the counter` : ''}
+                      {booking.fee ? ` · ${formatAED(booking.fee)}${booking.paid ? ' paid by card' : ''}` : ''}
                     </p>
                     <a href={whatsappLink(messageFor(booking))}>Send again on WhatsApp</a>
                   </article>

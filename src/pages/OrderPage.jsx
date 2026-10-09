@@ -1,24 +1,25 @@
 import { useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { boards, formatAED, menu, whatsappLink } from '../data'
 import { useStore } from '../context/Store'
+import { useAuth } from '../context/Auth'
 import OfferCarousel from '../components/OfferCarousel'
 import MenuBoard, { BoardTabs } from '../components/MenuBoard'
 import ItemModal from '../components/ItemModal'
 import PackageModal from '../components/PackageModal'
-
-function reference() {
-  return `ORD-${Date.now().toString().slice(-6)}`
-}
+import CardCounter from '../components/CardCounter'
 
 export default function OrderPage() {
   const { cart, updateQty, clearCart, totals, promoCode, promoMessage, applyPromo, saveOrder } = useStore()
-  const [board, setBoard] = useState(boards[0].id)
+  const { user, saveRecord } = useAuth()
+  const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const [board, setBoard] = useState(params.get('board') || boards[0].id)
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(null)
   const [packageOffer, setPackageOffer] = useState(null)
   const [code, setCode] = useState(promoCode || '')
   const [checkout, setCheckout] = useState(false)
-  const [placed, setPlaced] = useState(null)
 
   const openOffer = (offer) => {
     if (offer.mode === 'deal') {
@@ -37,7 +38,7 @@ export default function OrderPage() {
             Order
           </p>
           <h1>Send an order to the café</h1>
-          <p>Dine-in or pickup. You pay at Ahla Al Layali. WhatsApp carries the order to the team.</p>
+          <p>Dine-in or pickup. Create an account, pay by card, then send the receipt to the café on WhatsApp.</p>
         </div>
       </header>
       <section className="page-section">
@@ -117,22 +118,14 @@ export default function OrderPage() {
                   </div>
                 )}
                 <div className="calc-row total-row">
-                  <span>To pay at the café</span>
+                  <span>To pay</span>
                   <span>{formatAED(totals.total)}</span>
                 </div>
-                <button className="btn btn-primary" type="button" style={{ width: '100%', marginTop: '0.8rem' }} onClick={() => setCheckout(true)}>
+                <button className="btn btn-primary" type="button" style={{ width: '100%', marginTop: '0.8rem' }} onClick={() => (user ? setCheckout(true) : navigate('/login?next=/order'))}>
                   Checkout
                 </button>
-                <p className="pickup-guarantee">Pay by cash or card when you arrive. Codes: LAYALI10, NIGHTS.</p>
+                <p className="pickup-guarantee">Visa, Mastercard, and Amex at checkout. Codes: LAYALI10, NIGHTS.</p>
               </>
-            )}
-            {placed && (
-              <div className="form-success" style={{ marginTop: '1rem' }}>
-                {placed.ref} is ready.
-                <div>
-                  <a href={whatsappLink(placed.text)}>Send on WhatsApp</a>
-                </div>
-              </div>
             )}
           </aside>
         </div>
@@ -145,103 +138,131 @@ export default function OrderPage() {
           cart={cart}
           promoCode={promoCode}
           onClose={() => setCheckout(false)}
-          onPlace={(order) => {
-            saveOrder(order)
-            setPlaced(order)
-            setCheckout(false)
-          }}
+          onPlace={saveOrder}
+          user={user}
+          saveRecord={saveRecord}
         />
       )}
     </>
   )
 }
 
-function Checkout({ cart, totals, promoCode, onClose, onPlace }) {
-  const [form, setForm] = useState({ name: '', phone: '', mode: 'Dine-in', when: 'As soon as possible', note: '' })
-  const [error, setError] = useState('')
+function Checkout({ cart, totals, promoCode, onClose, onPlace, user, saveRecord }) {
+  const [form, setForm] = useState({
+    name: user?.name || '',
+    phone: user?.phone || '',
+    mode: 'Dine-in',
+    when: 'As soon as possible',
+    note: '',
+  })
+  const [paid, setPaid] = useState(null)
   const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
 
-  const submit = (event) => {
-    event.preventDefault()
-    if (!form.name.trim() || !form.phone.trim()) {
-      setError('Add the name and phone for the order.')
-      return
-    }
-    const lines = cart.map((line) => `${line.qty} × ${line.name}${line.summary ? ` (${line.summary})` : ''}${line.note ? ` — ${line.note}` : ''} — ${formatAED(line.unit * line.qty)}`)
-    const ref = reference()
+  const pay = async ({ brand, last4 }) => {
+    if (!user) return 'Create an account before paying.'
+    if (!form.name.trim() || !form.phone.trim()) return 'Add the name and phone for the order.'
+    const ref = `ORD-${Date.now().toString().slice(-6)}`
+    const lines = cart.map((line) => `${line.qty} × ${line.name}${line.summary ? ` (${line.summary})` : ''}`)
     const text = [
-      `Order ${ref} — Ahla Al Layali Cafe`,
+      `Order ${ref} — PAID`,
+      'Ahla Al Layali Cafe',
       `Name: ${form.name.trim()}`,
       `Phone: ${form.phone.trim()}`,
       `Type: ${form.mode}`,
       `When: ${form.when}`,
       ...lines,
-      `Subtotal: ${formatAED(totals.subtotal)}`,
-      promoCode ? `Promo ${promoCode}: − ${formatAED(totals.discount)}` : '',
-      `Total to pay at the café: ${formatAED(totals.total)}`,
+      promoCode ? `Promo: ${promoCode}` : '',
+      `Total: ${formatAED(totals.total)}`,
+      `Paid by ${brand}.`,
       form.note.trim() ? `Note: ${form.note.trim()}` : '',
     ]
       .filter(Boolean)
       .join('\n')
-    window.open(whatsappLink(text), '_blank', 'noopener,noreferrer')
-    onPlace({ ref, text, name: form.name.trim(), total: totals.total, mode: form.mode })
+    await saveRecord('order', {
+      ref,
+      text,
+      name: form.name.trim(),
+      total: totals.total,
+      mode: form.mode,
+      when: form.when,
+      lines,
+      paid: true,
+    })
+    onPlace({ ref, text, name: form.name.trim(), total: totals.total, mode: form.mode, paid: true })
+    setPaid({ ref, text, brand, last4, total: totals.total })
+    return ''
   }
 
   return (
     <div className="modal-backdrop" onClick={onClose} role="presentation">
-      <form className="modal-dialog item-modal-content" onClick={(event) => event.stopPropagation()} onSubmit={submit}>
+      <div className="modal-dialog checkout-sheet" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="checkout-title">
         <button className="modal-close" type="button" onClick={onClose} aria-label="Close">
           ×
         </button>
-        <h3>Checkout</h3>
-        <p className="item-modal-desc">The café prepares this after you send it on WhatsApp. Payment stays at the till.</p>
-        <div className="field">
-          <label htmlFor="o-name">Name</label>
-          <input id="o-name" value={form.name} onChange={set('name')} />
+        <div className="item-modal-content">
+          {paid ? (
+            <>
+              <span className="confirm-kicker">Paid by card</span>
+              <h3 id="checkout-title">Order {paid.ref} is paid</h3>
+              <p className="item-modal-desc">
+                {paid.brand} ···· {paid.last4}. {formatAED(paid.total)}. Send the receipt so the café starts it.
+              </p>
+              <a className="btn btn-primary" href={whatsappLink(paid.text)} target="_blank" rel="noreferrer">
+                Send receipt on WhatsApp
+              </a>
+            </>
+          ) : (
+            <CardCounter split amount={formatAED(totals.total)} onPaid={pay} note="Visa, Mastercard, and American Express.">
+              <h3 id="checkout-title">Checkout counter</h3>
+              <p className="item-modal-desc">Pay the order by card. The café gets it with the receipt.</p>
+              <div>
+                  <div className="field">
+                    <label htmlFor="o-name">Name</label>
+                    <input id="o-name" value={form.name} onChange={set('name')} />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="o-phone">Phone</label>
+                    <input id="o-phone" value={form.phone} onChange={set('phone')} />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="o-mode">How you will have it</label>
+                    <select id="o-mode" value={form.mode} onChange={set('mode')}>
+                      <option>Dine-in</option>
+                      <option>Pickup</option>
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="o-when">When</label>
+                    <select id="o-when" value={form.when} onChange={set('when')}>
+                      <option>As soon as possible</option>
+                      <option>In 30 minutes</option>
+                      <option>In 1 hour</option>
+                      <option>I am already at a table</option>
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="o-note">Note</label>
+                    <textarea id="o-note" value={form.note} onChange={set('note')} />
+                  </div>
+                  <div className="receipt">
+                    {cart.map((line) => (
+                      <div className="receipt-row" key={line.lineId}>
+                        <span>
+                          {line.qty} × {line.name}
+                        </span>
+                        <span>{formatAED(line.unit * line.qty)}</span>
+                      </div>
+                    ))}
+                    <div className="receipt-row">
+                      <strong>Total</strong>
+                      <strong>{formatAED(totals.total)}</strong>
+                    </div>
+                  </div>
+                </div>
+            </CardCounter>
+          )}
         </div>
-        <div className="field">
-          <label htmlFor="o-phone">Phone</label>
-          <input id="o-phone" value={form.phone} onChange={set('phone')} />
-        </div>
-        <div className="field">
-          <label htmlFor="o-mode">How you will have it</label>
-          <select id="o-mode" value={form.mode} onChange={set('mode')}>
-            <option>Dine-in</option>
-            <option>Pickup</option>
-          </select>
-        </div>
-        <div className="field">
-          <label htmlFor="o-when">When</label>
-          <select id="o-when" value={form.when} onChange={set('when')}>
-            <option>As soon as possible</option>
-            <option>In 30 minutes</option>
-            <option>In 1 hour</option>
-            <option>I am already at a table</option>
-          </select>
-        </div>
-        <div className="field">
-          <label htmlFor="o-note">Note</label>
-          <textarea id="o-note" value={form.note} onChange={set('note')} />
-        </div>
-        <div className="receipt">
-          {cart.map((line) => (
-            <div className="receipt-row" key={line.lineId}>
-              <span>
-                {line.qty} × {line.name}
-              </span>
-              <span>{formatAED(line.unit * line.qty)}</span>
-            </div>
-          ))}
-          <div className="receipt-row">
-            <strong>Total at the café</strong>
-            <strong>{formatAED(totals.total)}</strong>
-          </div>
-        </div>
-        {error && <p className="field-error">{error}</p>}
-        <button className="btn btn-primary" type="submit">
-          Save order and open WhatsApp
-        </button>
-      </form>
+      </div>
     </div>
   )
 }
