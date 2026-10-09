@@ -109,20 +109,22 @@ export function createAccounts(store, { adminPassword = '' } = {}) {
   async function ensureAdmin() {
     const email = ADMIN_EMAIL
     const existing = await store.get(userKey(email))
-    if (existing || !adminPassword) return existing
+    if (!adminPassword) return existing
+    if (existing && checkPassword(adminPassword, existing.passwordHash)) return existing
     const admin = {
+      ...(existing || {}),
       email,
-      name: 'Ana Maria',
-      dob: '',
-      phone: '',
-      whatsapp: '',
+      name: existing?.name || 'Ana Maria',
+      dob: existing?.dob || '',
+      phone: existing?.phone || '',
+      whatsapp: existing?.whatsapp || '',
       role: 'admin',
-      marketing: false,
-      termsAcceptedAt: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
+      marketing: existing?.marketing === true,
+      termsAcceptedAt: existing?.termsAcceptedAt || new Date().toISOString(),
+      createdAt: existing?.createdAt || new Date().toISOString(),
       passwordHash: hashPassword(adminPassword),
-      orders: [],
-      bookings: [],
+      orders: existing?.orders || [],
+      bookings: existing?.bookings || [],
     }
     await store.set(userKey(email), admin)
     const list = await users()
@@ -167,9 +169,9 @@ export function createAccounts(store, { adminPassword = '' } = {}) {
   }
 
   async function login(input) {
-    await ensureAdmin()
+    const admin = await ensureAdmin()
     const email = emailOf(input.email)
-    const user = await store.get(userKey(email))
+    const user = email === ADMIN_EMAIL ? admin : await store.get(userKey(email))
     if (!user || !checkPassword(String(input.password || ''), user.passwordHash)) {
       return { status: 400, body: { error: 'That email or password is not right.' } }
     }

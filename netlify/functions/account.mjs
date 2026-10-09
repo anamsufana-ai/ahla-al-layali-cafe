@@ -1,4 +1,4 @@
-import { getStore } from '@netlify/blobs'
+import { connectLambda, getStore } from '@netlify/blobs'
 import { createAccounts } from './accounts-lib.mjs'
 
 function json(status, body) {
@@ -30,6 +30,7 @@ export const handler = async (event) => {
     return json(400, { error: 'The account request was not valid.' })
   }
   try {
+    connectLambda(event)
     const accounts = createAccounts(blobStore(), { adminPassword: process.env.ADMIN_PASSWORD || '' })
     const result = await accounts.handle(input)
     return json(result.status, result.body)
