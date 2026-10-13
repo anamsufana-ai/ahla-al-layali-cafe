@@ -200,7 +200,7 @@ p { margin: 0; }
 }
 
 .hero {
-  min-height: 100svh;
+  min-height: calc(100svh - var(--install-bar, 0px));
   margin-top: calc(var(--nav-h) * -1);
   color: var(--foam);
   display: grid;
