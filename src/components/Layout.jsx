@@ -180,6 +180,7 @@ export default function Layout() {
             {' · '}
             <Link to="/privacy">Privacy</Link>
           </span>
+          <span>© 2026 Designed by ALEXIS FZC LLC</span>
         </div>
       </footer>
       {showTop && (
